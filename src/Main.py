@@ -4,19 +4,21 @@ from piptools.scripts.compile import BaseCommand
 from piptools.logging import log
 import os
 import platform
+import tempfile
 
 
 class RequirementsInWriter:
-    def __init__(self):
-        self.dst_file = "requirements.in"
+    def __init__(self, dst_file="requirements.in"):
+        self.dst_file = dst_file
 
     def check_for_in(self) -> bool:
-        if not os.path.exists("requirements.in"):
+        if not os.path.exists(self.dst_file):
             with click.open_file(self.dst_file, "w") as requirements_in:
                 pass
             return True
 
     def write(self, packages):
+        self.check_for_in()
         with click.open_file(self.dst_file, "r") as requirements_in:
             previous_lines = [i.strip("\n") for i in requirements_in.readlines()]
 
@@ -39,8 +41,7 @@ class RequirementsInWriter:
 )
 @click.argument("packages", nargs=-1)
 def install(packages):
-    writer = RequirementsInWriter()
-    writer.check_for_in()
+    writer = RequirementsInWriter("requirements.in")
     writer.write(packages)
     os.system("pip-compile requirements.in --output-file=requirements.txt")
     os.system("python -m pip install -r requirements.txt")
@@ -53,13 +54,15 @@ def install(packages):
 @click.argument("packages", nargs=-1)
 def uninstall(packages):
     if ".crawto-env-config" not in os.listdir():
-        raise Exception("Cannot find .crawto-env.config. Please run this in your root directory.")
+        raise Exception(
+            "Cannot find .crawto-env.config. Please run this in your root directory."
+        )
 
     with open(".crawto-env-config", "r") as config:
         env_name = config.read()
 
     os.system(f"virtualenv --clear {env_name}")
-    packages = [ i for i in packages ]
+    packages = [i for i in packages]
     in_packages = []
     with click.open_file("requirements.in", "r") as reqs_in:
         in_packages = [
@@ -67,10 +70,11 @@ def uninstall(packages):
             for i in reqs_in.readlines()
             if i.replace("\n", "") not in packages
         ]
-    with open("requirements.in","w") as blank_file:
+    with open("requirements.in", "w") as blank_file:
         blank_file.write("")
     install(in_packages)
     return
+
 
 @click.command(
     cls=BaseCommand, context_settings={"help_option_names": ("-h", "--help")}
@@ -83,14 +87,19 @@ def create(name):
     with click.open_file(".crawto-env-config", "w") as config:
         config.write(name)
     log.info("Activating virutal environment")
-    platform = platform.system()
+    os_name = platform.system()
     if os_name == "Windows":
         os.system(f"{name}/Scripts/activate")
     elif os_name in ["Linux", "Darwin"]:
         os.system(f"source {name}/bin/activate")
+    # create dev dependencies
+    dev_writer = RequirementsInWriter(".dev-requirements.in")
+    dev_writer.write(
+        ["black", "pre-commit", "pip-tools", "sourcery-cli", "pytest", "pytest-sugar"]
+    )
+    os.system("pip-compile .dev-requirements.in --output-file=.dev-requirements.txt")
+    os.system("python -m pip install -r .dev-requirements.txt")
 
-    log.info("Creating requirements.in")
-    install(["pip-tools"])
     return
 
 
